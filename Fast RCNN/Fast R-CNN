@@ -1,0 +1,139 @@
+# Fast R-CNN
+
+Created At: 2021년 7월 29일 오전 1:49
+Created By: 조승제
+Topics: Deep Learning, Object Detection
+Type: 📒 Lesson
+발표일: 2021년 7월 29일
+발표자: 조승제
+참석자: 조건우, 최소은, 유정민, 엄현식
+
+## 1. Introduction
+
+- R-CNN과 SPP-Net의 단점을 극복하기 위해 제안됨
+- R-CNN 단점
+    1. Training is a multi-stage pipeline
+    2. Training is expensive in space and time
+        1. For SVM and bounding-box regressor training, features are extracted from each object proposal in each image and written to disk.
+    3. Object detection is slow
+        1. Detection with VGG16 takes 47s / image (on a GPU).
+- SPP-Net 단점
+    1. SPP-Net에서는 (4x4, 2x2, 1x1)의 spatial bin을 이용하면 다양한 resolution을 학습하게 되는 장점이 있다고 설명
+    2. 하지만 하나의 객체에 대해서 다양한 resolution을 학습하게 되면 overfitting이 발생할 가능성이 높아짐
+- Contributions
+
+    We propose a new training algorithm that fixes the disadvantages of R-CNN and SPPnet, while improving on their speed and accuracy.
+
+    1. Higher detection quality (mAP) than R-CNN, SPPnet
+    2. Training is single-stage, using a multi-task loss
+    3. Training can update all network layers
+    4. No disk storage is required for feature caching
+
+    Fast R-CNN is written in Python and C++ [github](https://github.com/rbgirshick/)
+
+## 2. Fast R-CNN architecture and training
+
+![Fast%20R-CNN%206c77f95378934f4885809bf32b544035/Untitled.png](Fast%20R-CNN%206c77f95378934f4885809bf32b544035/Untitled.png)
+
+### 1) The RoI pooling layer
+
+- region of interest into a small feature map with a fixed spatial extent of H × W (e.g., 7 × 7)
+    - H and W are layer hyper-parameters
+- RoI is a rectangular window into a conv feature map. Each RoI is defined by a four-tuple (r, c, h, w) that specifies its top-left corner (r, c) and its height and width (h, w)
+- The RoI layer is simply the special-case of the spatial pyramid pooling layer used in SPPnets in which there is only one pyramid level.
+
+![Fast%20R-CNN%206c77f95378934f4885809bf32b544035/img.gif](Fast%20R-CNN%206c77f95378934f4885809bf32b544035/img.gif)
+
+### 2) Initializing from pre-trained networks
+
+- 5개의 max pooling layer, 5~13개의 conv layers가 있는 ImageNet으로 Pre-trained된 모델 3개로 Fast R-CNN의 CNN을 initializes해서 비교
+- Pre-trained network는 3가지 변환을 거침
+    1. 마지막 max pooling layer는 FC layer와 호환되도록 H, W값을 설정한 RoI Pooling layer로 대체
+    2. Pre-trained network의 마지막 FC layer와 softmax는 위에서 언급한 서로 다른 레이어 2개로 대체
+    3. 2가지 Input을 받을 수 있도록 수정 (Image, list of Rols)
+
+### 3) Fine-tuning for detection
+
+1. Hierarchical Sampling
+    1. R-CNN에서는 여러 장의 이미지에서 랜덤하게 N개의 영역을 샘플링한 mini-batch를 구성하여 학습
+    2. Fast R-CNN에서는 1장 또는 2장(N)의 이미지에서 R개의 영역을 샘플링한 mini-batch를 사용하여 학습에 필요한 CNN 연산량을 효율적으로 줄임
+    3. 논문에선 N은 2, R은 128 사용
+2. Multi-task loss
+    1. two sibling output layers를 가짐 (classification, bounding-box regression)
+    2. L1 distance를 계산하는 이유는 L2 distance를 계산할 시 gradient가 explode 되는 현상을 관찰했기 때문
+
+![Fast%20R-CNN%206c77f95378934f4885809bf32b544035/Untitled%201.png](Fast%20R-CNN%206c77f95378934f4885809bf32b544035/Untitled%201.png)
+
+![Fast%20R-CNN%206c77f95378934f4885809bf32b544035/Untitled%202.png](Fast%20R-CNN%206c77f95378934f4885809bf32b544035/Untitled%202.png)
+
+![Fast%20R-CNN%206c77f95378934f4885809bf32b544035/Untitled%203.png](Fast%20R-CNN%206c77f95378934f4885809bf32b544035/Untitled%203.png)
+
+![Fast%20R-CNN%206c77f95378934f4885809bf32b544035/Untitled%204.png](Fast%20R-CNN%206c77f95378934f4885809bf32b544035/Untitled%204.png)
+
+![Fast%20R-CNN%206c77f95378934f4885809bf32b544035/Untitled%205.png](Fast%20R-CNN%206c77f95378934f4885809bf32b544035/Untitled%205.png)
+
+![Fast%20R-CNN%206c77f95378934f4885809bf32b544035/Untitled%206.png](Fast%20R-CNN%206c77f95378934f4885809bf32b544035/Untitled%206.png)
+
+u:  fully-connacted   정답 벡터  배경 0 은 제외하고 계산한다 
+
+v : bounding box 정답 값
+
+The hyper-parameter λ in Eq. 1 controls the balance between the two task losses
+
+(λ = 1로 실험)
+
+### 4) Mini-batch sampling
+
+- N=2, R=128 → sampling 64 RoIs from each image
+- mini-batch의 25%는 IoU값이 0.5 이상인 RoIs, 나머지 75%는 IoU값이 0.1~0.5의 RoIs
+- 학습 과정에서 50% 확률로 Horizontal flip
+
+### 5) Back-propagation through RoI pooling layer
+
+- 이전 R-CNN, SPP Net은 각 Task 별로 fine-tuning을 진행했는데, 이는 성능 향상에 제약이 있다고 주장
+- RoI Pooling Layer 이전까지 back-propagation이 가능한 것인지 검증
+
+![Fast%20R-CNN%206c77f95378934f4885809bf32b544035/Untitled%207.png](Fast%20R-CNN%206c77f95378934f4885809bf32b544035/Untitled%207.png)
+
+Let xi ∈ R be the i-th activation input into the RoI pooling layer
+
+Let yrj be the layer’s j-th output from the r-th RoI
+
+![Fast%20R-CNN%206c77f95378934f4885809bf32b544035/Untitled%208.png](Fast%20R-CNN%206c77f95378934f4885809bf32b544035/Untitled%208.png)
+
+![Fast%20R-CNN%206c77f95378934f4885809bf32b544035/Untitled%209.png](Fast%20R-CNN%206c77f95378934f4885809bf32b544035/Untitled%209.png)
+
+![Fast%20R-CNN%206c77f95378934f4885809bf32b544035/Untitled%2010.png](Fast%20R-CNN%206c77f95378934f4885809bf32b544035/Untitled%2010.png)
+
+## 3. Main results
+
+1. State-of-the-art mAP on VOC07, 2010, and 2012
+2. Fast training and testing compared to R-CNN, SPPnet
+3. Fine-tuning conv layers in VGG16 improves mAP
+
+## 4. Experiments
+
+![Fast%20R-CNN%206c77f95378934f4885809bf32b544035/Untitled%2011.png](Fast%20R-CNN%206c77f95378934f4885809bf32b544035/Untitled%2011.png)
+
+- 모델 크기 별 실험
+    - S = CaffeNet (essentially AlexNet)
+    - M = VGG_CNN_M_1024
+    - L = VGG16
+
+    ![Fast%20R-CNN%206c77f95378934f4885809bf32b544035/Untitled%2012.png](Fast%20R-CNN%206c77f95378934f4885809bf32b544035/Untitled%2012.png)
+
+- SVM vs Softmax
+
+![Fast%20R-CNN%206c77f95378934f4885809bf32b544035/Untitled%2013.png](Fast%20R-CNN%206c77f95378934f4885809bf32b544035/Untitled%2013.png)
+
+- Speed Up
+
+![Fast%20R-CNN%206c77f95378934f4885809bf32b544035/Untitled%2014.png](Fast%20R-CNN%206c77f95378934f4885809bf32b544035/Untitled%2014.png)
+
+## 5. Conclusion
+
+- R-CNN, SPP-Net에 비해 뛰어난 성능
+- multi-task loss 사용으로 single-stage training이 가능해짐
+- Test time이 매우 단축됨
+    - 하지만 이미지 1장 당 2.3초의 시간이 소요되므로 실시간 탐지에는 역부족
+    - Region Proposal에 2.3초 중 2초가 걸림
